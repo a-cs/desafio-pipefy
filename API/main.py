@@ -1,13 +1,19 @@
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal, TypeAlias
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, RootModel, model_validator
 
 def create_type_from_list_of_options(valid_options: list[str], field: str) -> Any:
     # Creating a customized Pydantic typy from a list
+    
+    # [ ] TODO: o campo data_de_nascimento precisa aceitar valor DD/MM/YYYY
+	# [ ] TODO: o campo data precisa aceitar valor 01/01/1911 16:00 e 01/01/1911 4:00 PM
+    # [ ] TODO: o campo cpf precisa ter 11 digitos
+    # [ ] TODO: o telefone deve aceitar o formato +5585987654321  -> +55 (85) 99999-9999
+	# [ ] TODO: o telefone deve aceitar o formato 85987654321 ->  (85) 99999-9999
 
     options_set = set(valid_options)
     
@@ -32,16 +38,6 @@ sexo_options= [
 				"Prefere não responder"
 				]
 
-hobbies_options = [
-					"Teatro",
-					"Música",
-					"Cinema",
-					"Esportes",
-					"Leitura",
-					"Viagem",
-					"Artes"
-					]
-
 cidade_options = [
 					"Maracanaú",
 					"Maranguape",
@@ -51,6 +47,23 @@ cidade_options = [
 					"fortaleza",
 					"Florianópolis"
 					]
+
+valid_hobbies: TypeAlias = Literal[
+					"Teatro",
+					"Música",
+					"Cinema",
+					"Esportes",
+					"Leitura",
+					"Viagem",
+					"Artes"
+					]
+
+class list_hobbies(RootModel[list[valid_hobbies]]):
+    @model_validator(mode="after")
+    def check_duplicates(self) -> "list_hobbies":
+        if len(self.root) != len(set(self.root)):
+            raise ValueError("Valor inválido para hobbies: A lista não pode conter valores duplicados.")
+        return self
 
 
 
@@ -80,10 +93,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         # Removes Pydantic's default prefix
         if message.startswith("Value error, "):
             message = message.replace("Value error, ", "")
-            
+        if message.startswith("Input should be "):
+            if "date" in message:
+                message = "Data invalida"
+            else: 
+                message = message.replace("Input should be ", "Os valores permitidos são: ")
+                message = message.replace(" or ", " ou ")
         # Gets the exact field name that failed
-        field = error["loc"][-1] if error["loc"] else "payload"
-        
+        field = error["loc"][1] if error["loc"] else "payload"
         clean_errors.append({
             "campo": field,
             "mensagem": message
@@ -110,6 +127,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         },
     )
 
+
+
 class CardData(BaseModel):
     nome: str
     data_de_nascimento: date | None = None #requidred false 
@@ -119,10 +138,9 @@ class CardData(BaseModel):
     data: datetime | None = None #requidred false  #### checar tipo correto
     sexo: str | None = None
     sexo_validator = field_validator("sexo", mode="after")(create_type_from_list_of_options(sexo_options, "sexo"))
-    hobbies: str | None = None
-    hobbies_validator = field_validator("hobbies", mode="after")(create_type_from_list_of_options(hobbies_options, "hobbies"))
     cidade: str | None = None
     cidade_validator = field_validator("cidade", mode="after")(create_type_from_list_of_options(cidade_options, "cidade"))
+    hobbies: list_hobbies | None = None
 
 @app.get("/")
 def read_root():
