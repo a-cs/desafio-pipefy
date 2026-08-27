@@ -1,12 +1,11 @@
 from datetime import date, datetime
-from typing import Any, Literal, TypeAlias, Annotated
+from typing import Any, Literal, Type, TypeAlias, Annotated, Union
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator, RootModel, model_validator, BeforeValidator, PlainSerializer, WithJsonSchema
 
-	# [ ] TODO: o campo data precisa aceitar valor 01/01/1911 16:00 e 01/01/1911 4:00 PM
 	# [ ] TODO: o campo cpf precisa ter 11 digitos
 	# [ ] TODO: o telefone deve aceitar o formato +5585987654321  -> +55 (85) 99999-9999
 	# [ ] TODO: o telefone deve aceitar o formato 85987654321 ->  (85) 99999-9999
@@ -63,27 +62,46 @@ class list_hobbies(RootModel[list[valid_hobbies]]):
             raise ValueError("Valor inválido para hobbies: A lista não pode conter valores duplicados.")
         return self
 
-# 1. Função que converte a string BR para objeto date do Python
-def convert_br_date_format(value: Any) -> date:
-    if isinstance(value, date) and not isinstance(value, datetime):
-        return value
-    if isinstance(value, str):
-        try:
-            return datetime.strptime(value, "%d/%m/%Y").date()
-        except ValueError:
-            raise ValueError("A data deve estar no formato DD/MM/YYYY.")
-    raise ValueError("Tipo de dado inválido para data.")
+# 1.Factory method to create validatos for the BR date and datetime format
+def dates_br_factory(expected_type: Type[Union[date, datetime]]) -> Any:
+	is_datetime = expected_type is datetime
+	formats = ["%d/%m/%Y %H:%M"] if is_datetime else ["%d/%m/%Y"]
+	error_msg = "DD/MM/YYYY HH:MM" if is_datetime else "DD/MM/YYYY"
 
-# 2. Tipo customizado completo:
-# - Valida a entrada em formato DD/MM/YYYY
-# - Devolve a resposta na API em formato DD/MM/YYYY
-# - Altera o exemplo visual do Swagger para "DD/MM/YYYY"
+	def validator(value: Any) -> Any:
+		if isinstance(value, str):
+			for format in formats:
+				try:
+					dt = datetime.strptime(value, format)
+					return dt if is_datetime else dt.date()
+				except ValueError:
+					continue
+			raise ValueError(f"Formato de data inválido. Use o padrão {error_msg}.")
+		raise ValueError(f"O campo deve ser uma string no formato {error_msg}.")
+
+	def serializer(value: Any) -> str:
+		output_format = "%d/%m/%Y %H:%M" if isinstance(value, datetime) else "%d/%m/%Y"
+		return value.strftime(output_format)
+
+	return validator, serializer, error_msg
+
+validate_date, format_date, date_example = dates_br_factory(date)
+validate_datetime, format_datetime, datetime_example = dates_br_factory(datetime)
+
 DateBR = Annotated[
-    date,
-    BeforeValidator(convert_br_date_format),
-    PlainSerializer(lambda d: d.strftime("%d/%m/%Y"), return_type=str),
-    WithJsonSchema({"type": "string", "format": "date", "example": "25/12/2000"})
-]
+	date,
+	BeforeValidator(validate_date),
+	PlainSerializer(format_date, return_type=str),
+	WithJsonSchema({"type": "string", "example": date_example})
+	]
+DatetimeBR = Annotated[
+	datetime,
+	BeforeValidator(validate_datetime),
+	PlainSerializer(format_datetime, return_type=str),
+	WithJsonSchema({"type": "string", "example": datetime_example})
+	]
+
+
 
 
 app = FastAPI()
@@ -149,16 +167,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 class CardData(BaseModel):
-    nome: str
+    nome: str #requidred true
     data_de_nascimento: DateBR | None = None #requidred false 
     cpf: int | None = None #requidred false  #### checar tipo correto
     telefone: int | None = None #requidred false  #### checar tipo correto
-    data: datetime | None = None #requidred false  #### checar tipo correto
-    sexo: str | None = None
+    data: DatetimeBR | None = None #requidred false
+    sexo: str | None = None #requidred false
     sexo_validator = field_validator("sexo", mode="after")(create_type_from_list_of_options(sexo_options, "sexo"))
-    cidade: str | None = None
+    cidade: str | None = None #requidred false
     cidade_validator = field_validator("cidade", mode="after")(create_type_from_list_of_options(cidade_options, "cidade"))
-    hobbies: list_hobbies | None = None
+    hobbies: list_hobbies | None = None #requidred false
 
 @app.get("/")
 def read_root():
