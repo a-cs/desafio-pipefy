@@ -5,7 +5,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator, RootModel, model_validator, BeforeValidator, PlainSerializer, WithJsonSchema
-
 	# [ ] TODO: o telefone deve aceitar o formato +5585987654321  -> +55 (85) 99999-9999
 	# [ ] TODO: o telefone deve aceitar o formato 85987654321 ->  (85) 99999-9999
 
@@ -110,6 +109,18 @@ CPF = Annotated[
 	)
 ]
 
+def validate_telefone_br(value: Any) -> str:
+	if not isinstance(value, int):
+		raise ValueError("O telefone deve ser enviado apenas com números.")
+	phone_str = str(value)
+	if len(phone_str) not in (10,11):
+		raise ValueError(
+				f"O telefone deve conter o DD mais 8 dígitos para número fixo ou DD mais 9 dígitos para celular. O número enviado tem um total de {len(phone_str)} dígitos."
+			)
+	return f"+55{value}"
+
+TelefoneBr = Annotated[str,BeforeValidator(validate_telefone_br)]
+
 
 app = FastAPI()
 
@@ -128,7 +139,6 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 	is_json_malformed = False
 
 	for error in exc.errors():
-		#handle syntax error, json_invalid
 		if error["type"] in ("json_invalid", "value_error.jsondecode"):
 			is_json_malformed = True
 			break
@@ -177,8 +187,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 class CardData(BaseModel):
 	nome: str #requidred true
 	data_de_nascimento: DateBR | None = None #requidred false 
-	cpf: CPF | None = None #requidred false  #### checar tipo correto
-	telefone: int | None = None #requidred false  #### checar tipo correto
+	cpf: CPF | None = None #requidred false
+	telefone: TelefoneBr | None = None #requidred false
 	data: DatetimeBR | None = None #requidred false
 	sexo: str | None = None #requidred false
 	sexo_validator = field_validator("sexo", mode="after")(create_type_from_list_of_options(sexo_options, "sexo"))
@@ -187,8 +197,8 @@ class CardData(BaseModel):
 	hobbies: list_hobbies | None = None #requidred false
 
 @app.get("/")
-def read_root():
-	return {"message": "Welcome to my Python API!"}
+def greeting():
+	return {"message": "Bem vindo a API!"}
 
 @app.post("/card")
 def create_card(card: CardData) -> dict[str, Any]:
