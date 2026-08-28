@@ -157,7 +157,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 			else: 
 				message = message.replace("Input should be ", "Os valores permitidos são: ")
 				message = message.replace(" or ", " ou ")
-
+		elif message == "Field required":
+			message = "Campo obrigatório"
 		clean_errors.append({
 			"campo": field,
 			"mensagem": message
@@ -194,7 +195,7 @@ class CardData(BaseModel):
 	data: DatetimeBR | None = None #requidred false
 	sexo: str | None = None #requidred false
 	sexo_validator = field_validator("sexo", mode="after")(create_type_from_list_of_options(sexo_options, "sexo"))
-	cidade: str | None = None #requidred false
+	cidade: str #requidred true
 	cidade_validator = field_validator("cidade", mode="after")(create_type_from_list_of_options(cidade_options, "cidade"))
 	hobbies: list_hobbies | None = None #requidred false
 
