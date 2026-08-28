@@ -4,9 +4,8 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator, RootModel, model_validator, BeforeValidator, PlainSerializer, WithJsonSchema
-	# [ ] TODO: o telefone deve aceitar o formato +5585987654321  -> +55 (85) 99999-9999
-	# [ ] TODO: o telefone deve aceitar o formato 85987654321 ->  (85) 99999-9999
+from pydantic import BaseModel, Field, field_validator, RootModel, model_validator, BeforeValidator, PlainSerializer, WithJsonSchema, StringConstraints
+
 
 def create_type_from_list_of_options(valid_options: list[str], field: str) -> Any:
 	# Creating a customized Pydantic typy from a list
@@ -120,6 +119,7 @@ def validate_telefone_br(value: Any) -> str:
 	return f"+55{value}"
 
 TelefoneBr = Annotated[str,BeforeValidator(validate_telefone_br)]
+short_text = Annotated[str, StringConstraints(max_length=255)]
 
 
 app = FastAPI()
@@ -145,7 +145,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 		field = error["loc"][1] if error["loc"] else "payload"
 		message = error["msg"]
 
-		if field == "cpf":
+		if field == "nome" and error["type"] == "string_too_long":
+			message = "O nome pode ter no máximo 255 caracteres."
+		elif field == "cpf":
 			message = "CPF inválido. O CPF deve ser um texto (string) contendo 11 números. Ex: 01234567891"
 		elif message.startswith("Value error, "):
 			message = message.replace("Value error, ", "")
@@ -185,7 +187,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 class CardData(BaseModel):
-	nome: str #requidred true
+	nome: short_text #requidred true
 	data_de_nascimento: DateBR | None = None #requidred false 
 	cpf: CPF | None = None #requidred false
 	telefone: TelefoneBr | None = None #requidred false
@@ -202,6 +204,8 @@ def greeting():
 
 @app.post("/card")
 def create_card(card: CardData) -> dict[str, Any]:
+	if card.data == None:
+		card.data = datetime.now()
 	print(card)
 	return {
 		"received_data": card
