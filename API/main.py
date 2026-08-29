@@ -1,12 +1,13 @@
 from datetime import date, datetime
-import sys
 from typing import Any, Literal, Type, TypeAlias, Annotated, Union
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+import httpx
 from pydantic import BaseModel, Field, field_validator, RootModel, model_validator, BeforeValidator, PlainSerializer, WithJsonSchema, StringConstraints
 from dotenv import load_dotenv
+import sys
 import os
 
 def env_initialization(): 
@@ -81,7 +82,7 @@ class list_hobbies(RootModel[list[valid_hobbies]]):
 			raise ValueError("Valor inválido para hobbies: A lista não pode conter valores duplicados.")
 		return self
 
-# 1.Factory method to create validatos for the BR date and datetime format
+# 1.Factory method to create validators for the BR date and datetime format
 def dates_br_factory(expected_type: Type[Union[date, datetime]]) -> Any:
 	is_datetime = expected_type is datetime
 	format = "%d/%m/%Y %H:%M" if is_datetime else "%d/%m/%Y"
@@ -169,13 +170,15 @@ class CardData(BaseModel):
 				value = self.cidade_id
 			else:
 				value = getattr(self, field_name)
+				print(value)
 				value = getattr(value, "root", value)
+				print(value)
 			if value is None:
 				continue
 
 			fields_attributes.append({
 				"field_id": field_name,
-				"field_value": str(value)
+				"field_value": str(value) if field_name != "hobbies" else value
 			})
 
 		return fields_attributes
@@ -225,49 +228,55 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 	if is_json_malformed:
 		return JSONResponse(
-			status_code=status.HTTP_400_BAD_REQUEST,  # 400 é semanticamente melhor para JSON quebrado
+			status_code=status.HTTP_400_BAD_REQUEST,
 			content={
 				"error": "Erro de sintaxe no JSON",
 				"details": [
 					{
-						"field": "body",
-						"message": "O body da requisição está com um erro de sintaxe no JSON."
+						"messagem": "O body da requisição está com um erro de sintaxe no JSON."
 					}
 				]
 			},
 		)
 
 	return JSONResponse(
-		status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+		status_code=status.HTTP_400_BAD_REQUEST,
 		content={
 			"error":  clean_errors
 		},
 	)
 
-pipefy_api_url = os.getenv("PIPEFY_API_URL")
-pipefy_token = os.getenv("PIPEFY_TOKEN")
-pipe_id = os.getenv("PIPE_ID")
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, e: HTTPException):
+	return JSONResponse(
+		status_code=e.status_code,
+		content={"error":{"mensagem": e.detail}}, 
+	)
+
+pipefy_api_url = os.environ["PIPEFY_API_URL"]
+pipefy_token = os.environ["PIPEFY_TOKEN"]
+pipe_id = os.environ["PIPE_ID"]
 
 @app.get("/")
 def greeting():
 	return {"message": "Bem vindo a API!"}
 
 @app.post("/card")
-def create_card(card: CardData) -> dict[str, Any]:
+async def create_card(card: CardData) -> dict[str, Any]:
 	card_title = card.nome
 	pipefy_fields = card.to_pipefy_fields()
 
 	query = """
-	mutation ($pipe_id: ID!, $title: String!, $fields_attributes: [UndefinedInput]) {
+	mutation ($pipe_id: ID!, $title: String!, $fields_attributes: [FieldValueInput]) {
 		createCard(input: {
-		pipe_id: $pipe_id,
-		title: $title,
-		fields_attributes: $fields_attributes
+			pipe_id: $pipe_id,
+			title: $title,
+			fields_attributes: $fields_attributes
 		}) {
-		card {
-			id
-			title
-		}
+			card {
+				id
+				title
+			}
 		}
 	}
 	"""
@@ -283,6 +292,41 @@ def create_card(card: CardData) -> dict[str, Any]:
 		"Content-Type": "application/json"
 	}
 
-	return {
-		"received_data": card.to_pipefy_fields()
-	}
+	print(variables)
+
+	async with httpx.AsyncClient() as client:
+		try:
+			response = await client.post(
+				pipefy_api_url,
+				json={"query": query, "variables": variables},
+				headers=headers
+			)
+			
+			# Valida erro de conexão HTTP genérico (ex: 404 ou 500 do servidor deles)
+			if response.status_code != 200:
+				raise HTTPException(
+					status_code=response.status_code, 
+					detail=f"Erro na API do Pipefy: {response.text}"
+				)
+				
+			response_data = response.json()
+			
+			# Tratamento essencial: GraphQL retorna HTTP 200 mesmo em erros de sintaxe interna
+			if "errors" in response_data:
+				raise HTTPException(
+					status_code=status.HTTP_400_BAD_REQUEST,
+					detail=response_data["errors"][0]["message"]
+				)
+				
+			# Retorno de sucesso com o ID do card criado
+			return {
+				"mensagem": "Card criado no Pipefy com sucesso!",
+				"card_id": response_data["data"]["createCard"]["card"]["id"]
+			}
+			
+		except httpx.RequestError as e:
+			raise HTTPException(
+				status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+				detail=f"Falha ao tentar conectar ao Pipefy: {e}"
+			)
+
