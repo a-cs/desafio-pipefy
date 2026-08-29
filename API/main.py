@@ -248,6 +248,8 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(HTTPException)
 async def custom_http_exception_handler(request: Request, e: HTTPException):
+	if "Card not found with id:" in e.detail:
+		e.detail = e.detail.replace("Card not found with id:", "Não foi possível encontrar o card com o id:")
 	return JSONResponse(
 		status_code=e.status_code,
 		content={"error":{"mensagem": e.detail}}, 
@@ -330,3 +332,62 @@ async def create_card(card: CardData) -> dict[str, Any]:
 				detail=f"Falha ao tentar conectar ao Pipefy: {e}"
 			)
 
+@app.delete("/card/{card_id}")
+async def delete_card(card_id: int):
+	query = """
+	mutation ($card_id: ID!) {
+		deleteCard(input: { id: $card_id }) {
+		success
+		}
+	}
+	"""
+
+	variables = {
+		"card_id": str(card_id)
+	}
+
+	headers = {
+		"Authorization": f"Bearer {pipefy_token}",
+		"Content-Type": "application/json"
+	}
+
+	async with httpx.AsyncClient() as client:
+		try:
+			response = await client.post(
+				pipefy_api_url,
+				json={"query": query, "variables": variables},
+				headers=headers
+			)
+			
+			if response.status_code != 200:
+				raise HTTPException(
+					status_code=response.status_code, 
+					detail=f"Erro na comunicação com o Pipefy: {response.text}"
+				)
+				
+			response_data = response.json()
+			
+			if "errors" in response_data:
+				raise HTTPException(
+					status_code=status.HTTP_400_BAD_REQUEST,
+					detail=response_data["errors"][0]["message"]
+				)
+				
+			success_status = response_data["data"]["deleteCard"]["success"]
+			
+			if not success_status:
+				raise HTTPException(
+					status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+					detail="O Pipefy processou a requisição, mas não conseguiu deletar o card."
+				)
+				
+			return {
+				"status": "sucesso",
+				"mensagem": f'Card "{card_id}" deletado com sucesso do Pipefy!'
+			}
+			
+		except httpx.RequestError as exc:
+			raise HTTPException(
+				status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+				detail=f"Falha de rede ao tentar conectar ao Pipefy: {exc}"
+			)
