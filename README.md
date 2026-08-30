@@ -15,3 +15,11 @@
   ```shell
   uvicorn main:app --reload
   ```
+
+## Para utilizar Collection no Postman para conectar a api
+- Execute a API
+- Abra o Postman
+- Importe a Collection do arquivo "Desafio Pipefy.postman_collection.json"
+- No Postman, Crie a variavel de ambiente chamada "url", no campo value da variavel coloque "http://localhost:8000"
+- Ativar o Ambiente para que a variavel seja carregada
+- Executar as requisições da Collection importada
