@@ -250,6 +250,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def custom_http_exception_handler(request: Request, e: HTTPException):
 	if "Card not found with id:" in e.detail:
 		e.detail = e.detail.replace("Card not found with id:", "Não foi possível encontrar o card com o id:")
+	if "Couldn't find Card with ID=" in e.detail:
+		e.detail = e.detail.replace("Couldn't find Card with ID=", "Não foi possível encontrar o card com o id: ")
+	if "The card is already in the destination phase." in e.detail:
+		e.detail = "O Card já está na phase de destino."
 	return JSONResponse(
 		status_code=e.status_code,
 		content={"error":{"mensagem": e.detail}}, 
@@ -383,7 +387,82 @@ async def delete_card(card_id: int):
 				
 			return {
 				"status": "sucesso",
-				"mensagem": f'Card "{card_id}" deletado com sucesso do Pipefy!'
+				"mensagem": f'Card {card_id} deletado com sucesso do Pipefy!'
+			}
+			
+		except httpx.RequestError as exc:
+			raise HTTPException(
+				status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+				detail=f"Falha de rede ao tentar conectar ao Pipefy: {exc}"
+			)
+
+allowed_phases_id = Literal[323403002, 323403003, 323403004]
+
+class change_card_phase_data(BaseModel):
+	destination_phase_id: allowed_phases_id
+
+@app.post("/card/{card_id}/change_phase")
+async def change_card_to_phase(card_id: int, phase: change_card_phase_data) -> dict[str, str | dict[str, Any]]:
+	query = """
+	mutation ($card_id: ID!, $destination_phase_id: ID!) {
+		moveCardToPhase(input: { 
+		card_id: $card_id, 
+		destination_phase_id: $destination_phase_id 
+		}) {
+		card {
+			id
+			title
+			current_phase {
+			id
+			name
+			}
+		}
+		}
+	}
+	"""
+
+	variables = {
+		"card_id": str(card_id),
+		"destination_phase_id": str(phase.destination_phase_id)
+	}
+
+	headers = {
+		"Authorization": f"Bearer {pipefy_token}",
+		"Content-Type": "application/json"
+	}
+
+	async with httpx.AsyncClient() as client:
+		try:
+			response = await client.post(
+				pipefy_api_url,
+				json={"query": query, "variables": variables},
+				headers=headers
+			)
+			
+			if response.status_code != 200:
+				raise HTTPException(
+					status_code=response.status_code, 
+					detail=f"Erro na comunicação com o Pipefy: {response.text}"
+				)
+				
+			response_data = response.json()
+			
+			if "errors" in response_data:
+				raise HTTPException(
+					status_code=status.HTTP_400_BAD_REQUEST,
+					detail=response_data["errors"][0]["message"]
+				)
+				
+			updated_card = response_data["data"]["moveCardToPhase"]["card"]
+			
+			return {
+				"mensagem": f"Card movido para a phase {updated_card["current_phase"]["id"]} com sucesso!{" O Card chegou na phase final!" if updated_card["current_phase"]["name"] == "Concluído" else ""}",
+				"dados": {
+					"card_id": updated_card["id"],
+					"titulo": updated_card["title"],
+					"nova_phase_id": updated_card["current_phase"]["id"],
+					"nova_phase_nome": updated_card["current_phase"]["name"]
+				}
 			}
 			
 		except httpx.RequestError as exc:
