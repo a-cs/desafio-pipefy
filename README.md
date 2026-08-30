@@ -72,3 +72,67 @@
 - No Postman, crie a variavel de ambiente chamada "url", no campo value da variavel coloque "http://localhost:8000"
 - Ativar o Ambiente para que a variavel seja carregada
 - Executar as requisições da Collection importada
+
+<br/>
+<br/>
+<br/>
+
+# Como utilizar as Rotas do Postman
+
+## Create Card
+- Os dados deverão ser passados no body da requisição,
+	- Ex:
+	```json
+	{
+		"nome": "Nome",
+		"sexo": "Masculino",
+		"cidade": "Fortaleza",
+		"hobbies": ["Viagem", "Cinema"],
+		"data_de_nascimento": "01/01/2000",
+		"data": "28/08/2026 10:01",
+		// "cpf": "01234567891",
+		"telefone": 85123456789
+	}
+	```
+	Obs:
+	1. Apenas os campos de nome e cidade são obrigatórios.
+	2. No campo sexo os valores permitidos são: 
+		```json
+		"Masculino", "Feminino" ou "Prefere não responder"
+		```
+	3. No campo cidade os valores permitidos são:
+		```json
+		"Maracanaú", "Maranguape", "Eusébio", "Caucaia", "Fortaleza", "fortaleza", "Florianópolis"
+		```
+	4. No campo hobbies deverá ser uma lista contendos alguns dos valores permitidos dessa lista:
+		```json
+		["Teatro", "Música", "Cinema", "Esportes", "Leitura", "Viagem", "Artes"]
+		```
+	5. Caso deseje utilizar o campo cpf, o valor do cpf precisará ser um valor válido.
+	6. O campo telefone deverá ser nos formatos
+        - (85) 91234-5678, passando apenas os digitos no campo:
+			```json
+			85912345678
+			```
+        - ou (85) 1234-5678, passando apenas os digitos no campo:
+			```json
+			8512345678
+			```
+
+
+## Delete Card
+- O card_id devera ser passado como path param na url da requisição
+	- Ex: 
+	 ```{{url}}/card/{card_id}```
+
+## Move Card to phase
+- O card_id devera ser passado como path param na url da requisição
+	- Ex: 
+	 ```{{url}}/card/{card_id}```
+- No body da requisição deverá ser passado um phase_id valido
+	- Ex:
+	```json
+	{
+		"destination_phase_id": {phase_id}
+	}
+	```
